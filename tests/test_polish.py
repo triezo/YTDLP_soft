@@ -14,20 +14,20 @@ r = tk.Tk()
 app = m.App(r)
 r.update(); r.update_idletasks()
 
-print("коэффициент масштаба k =", round(app.k, 3))
-print("размер окна:", r.winfo_width(), "x", r.winfo_height())
-assert abs(app.k - 1.0) < 0.01, "на этом экране масштаб должен быть 1.0"
-exp_h = min(790, r.winfo_screenheight() - 70)   # та же формула, что в коде
+print("scale factor k =", round(app.k, 3))
+print("window size:", r.winfo_width(), "x", r.winfo_height())
+assert abs(app.k - 1.0) < 0.01, "scaling on this display should be 1.0"
+exp_h = min(790, r.winfo_screenheight() - 70)   # the same formula the app uses
 assert (r.winfo_width(), r.winfo_height()) == (640, exp_h), \
-    f"размер при 100% неожиданный: {r.winfo_width()}x{r.winfo_height()}"
+    f"unexpected size at 100%: {r.winfo_width()}x{r.winfo_height()}"
 
-# окно по центру
+# window is centred
 x, y = r.winfo_x(), r.winfo_y()
 cx = (r.winfo_screenwidth() - r.winfo_width()) // 2
-print(f"позиция: {x},{y}  (ожидали x≈{cx})")
-assert abs(x - cx) <= 2, "окно не по центру"
+print(f"position: {x},{y}  (expected x~{cx})")
+assert abs(x - cx) <= 2, "the window is not centred"
 
-# вкладки не прыгают
+# tabs do not jump
 bounds = []
 for i in range(3):
     app.nb.select(i)
@@ -41,12 +41,12 @@ for i in range(3):
         if idx != last:
             b.append(px); last = idx
     bounds.append(tuple(b))
-print("границы вкладок:", set(bounds))
-assert len(set(bounds)) == 1, "вкладки всё ещё скачут"
+print("tab boundaries:", set(bounds))
+assert len(set(bounds)) == 1, "the tabs still jump"
 
-# формула для экрана 150%
+# what the formula gives on a 150% display
 for dpi in (96, 120, 144):
     k = max(dpi / 96.0, 1.0)
-    print(f"  при {int(dpi/96*100)}%: окно {int(640*k)}x{int(700*k)}")
+    print(f"  at {int(dpi/96*100)}%: window {int(640*k)}x{int(700*k)}")
 r.destroy()
 print("ALL OK")

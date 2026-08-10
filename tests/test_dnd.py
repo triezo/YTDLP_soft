@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Перетаскивание: регистрация целей и поведение по типам содержимого."""
+"""Drag-and-drop: target registration and behaviour per payload type."""
 import os as _os
 _ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 APP = _os.path.join(_ROOT, "ytdlp_gui.pyw")
@@ -25,8 +25,8 @@ subprocess.run([m.FFMPEG, "-y", "-loglevel", "error", "-f", "lavfi",
 r = tk.Tk(); r.withdraw()
 app = m.App(r)
 r.update()
-print("перетаскивание доступно:", app.dnd_ok)
-assert app.dnd_ok, "цели не зарегистрировались"
+print("drag-and-drop available:", app.dnd_ok)
+assert app.dnd_ok, "drop targets were not registered"
 
 
 class Ev:
@@ -34,55 +34,55 @@ class Ev:
         self.data = data
 
 
-# --- ссылка на вкладке загрузки
+# --- a link while the Convert tab is open
 app.nb.select(1)
 app._on_drop(Ev("https://youtu.be/abc123"))
 r.update()
-print("ссылка ->", app.url.get(), "| вкладка", app.nb.index(app.nb.select()))
+print("link ->", app.url.get(), "| tab", app.nb.index(app.nb.select()))
 assert app.url.get() == "https://youtu.be/abc123"
-assert app.nb.index(app.nb.select()) == 0, "не переключилось на загрузку"
+assert app.nb.index(app.nb.select()) == 0, "did not switch to Download"
 
-# --- видеофайл, брошенный на вкладку загрузки
+# --- a video dropped on the Download tab
 app.nb.select(0)
 app._on_drop(Ev("{%s}" % vid))
 r.update()
-print("видео ->", os.path.basename(app.src.get()), "| вкладка",
+print("video ->", os.path.basename(app.src.get()), "| tab",
       app.nb.index(app.nb.select()))
 assert app.src.get() == vid, app.src.get()
-assert app.nb.index(app.nb.select()) == 1, "не ушло в конвертацию"
+assert app.nb.index(app.nb.select()) == 1, "did not move to Convert"
 
-# --- PNG на вкладку картинки
+# --- a PNG on the Image tab
 app.nb.select(2)
 app._on_drop(Ev("{%s}" % png))
 r.update()
 print("PNG ->", app.img_w, "×", app.img_h)
-assert (app.img_w, app.img_h) == (4, 3), "PNG не загрузился"
+assert (app.img_w, app.img_h) == (4, 3), "PNG did not load"
 
-# --- JPEG (свой декодер не умеет, идёт через ffmpeg)
+# --- JPEG: our decoder cannot read it, so it goes through ffmpeg
 app._on_drop(Ev("{%s}" % jpg))
 r.update()
 print("JPEG ->", app.img_w, "×", app.img_h, "|", app.status.cget("text")[:50])
-assert (app.img_w, app.img_h) == (64, 48), "JPEG не прочитался через ffmpeg"
+assert (app.img_w, app.img_h) == (64, 48), "JPEG was not read through ffmpeg"
 
-# --- картинка, бронённая на вкладку загрузки, всё равно откроется как картинка
+# --- an image dropped on Download still opens on the Image tab
 app.nb.select(0)
 app._on_drop(Ev("{%s}" % png))
 r.update()
-assert app.nb.index(app.nb.select()) == 2, "картинка не ушла на свою вкладку"
-print("картинка с вкладки загрузки уехала на вкладку Image — ОК")
+assert app.nb.index(app.nb.select()) == 2, "image did not move to its own tab"
+print("image dropped on Download moved to the Image tab: OK")
 
-# --- пути с пробелами
+# --- paths containing spaces
 spaced = os.path.join(work, "two words.png")
 open(spaced, "wb").write(open(png, "rb").read())
 app._on_drop(Ev("{%s}" % spaced))
 r.update()
-assert app.img_w == 4, "путь с пробелом не разобрался"
-print("путь с пробелами — ОК")
+assert app.img_w == 4, "a path with a space was not parsed"
+print("paths with spaces: OK")
 
-# --- мусор
-app._on_drop(Ev("просто текст"))
+# --- junk payload
+app._on_drop(Ev("just some text"))
 r.update()
-print("мусор ->", app.status.cget("text"))
+print("junk ->", app.status.cget("text"))
 assert "not a file or a link" in app.status.cget("text")
 
 r.destroy()

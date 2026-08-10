@@ -1,21 +1,21 @@
 # -*- coding: utf-8 -*-
-"""Простой графический интерфейс для yt-dlp + конвертер/сжатие через ffmpeg.
+"""A small GUI for yt-dlp, plus a converter built on ffmpeg.
 
-Запуск: ярлык на рабочем столе, "YT-DLP GUI.bat" или этот .pyw
-питоном 3.12, где установлены tkinter и yt-dlp.
+Run it from the desktop shortcut, from "YT-DLP GUI.bat", or feed this
+.pyw to a Python 3 that has tkinter and yt-dlp installed.
 """
 
 import os
 import re
 import sys
 
-# Собранный exe умеет работать И как yt-dlp: он запускает сам себя с этим
-# флагом вместо внешней программы. Проверка должна быть до всего остального.
+# The built exe can also act AS yt-dlp: it launches itself with this
+# flag instead of calling an external program. Check this before anything else.
 YTDLP_FLAG = "--__run_ytdlp__"
 if len(sys.argv) > 1 and sys.argv[1] == YTDLP_FLAG:
     del sys.argv[1]
-    # Без этого встроенный yt-dlp пишет в кодировке системы (cp1251), а окно
-    # читает UTF-8 — кириллица в названиях и путях превращается в кашу.
+    # Without this the bundled yt-dlp writes in the system codepage while the
+    # window reads UTF-8, turning non-ASCII titles and paths into garbage.
     for _s in (sys.stdout, sys.stderr):
         try:
             _s.reconfigure(encoding="utf-8", errors="replace")
@@ -38,8 +38,8 @@ from collections import deque
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
-# Перетаскивание из проводника и браузера. Без библиотеки программа
-# работает как раньше, просто без drag-and-drop.
+# Drag-and-drop from Explorer and browsers. Without the library the app
+# still works, just without drag-and-drop.
 try:
     from tkinterdnd2 import TkinterDnD, DND_FILES, DND_TEXT
 except ImportError:
@@ -75,7 +75,7 @@ def save_last_folder(path, name="last_folder"):
 
 
 def read_clipboard_win():
-    """Чтение буфера обмена напрямую через WinAPI (CF_UNICODETEXT)."""
+    """Read the clipboard straight from WinAPI (CF_UNICODETEXT)."""
     u32, k32 = ctypes.windll.user32, ctypes.windll.kernel32
     u32.OpenClipboard.argtypes = [wt.HWND]
     u32.GetClipboardData.restype = wt.HANDLE
@@ -104,7 +104,7 @@ def _png_chunk(tag, data):
 
 
 def encode_png(w, h, rgba):
-    """RGBA-байты (w*h*4) -> PNG."""
+    """RGBA bytes (w*h*4) -> PNG."""
     stride = w * 4
     raw = bytearray()
     for y in range(h):
@@ -116,9 +116,9 @@ def encode_png(w, h, rgba):
 
 
 def decode_png(data):
-    """PNG -> (rgba, w, h) или None. 8 бит на канал, без чересстрочности.
-    Нужен, когда буфер отдал только PNG (браузеры) — из DIB пиксели берутся
-    напрямую и куда быстрее."""
+    """PNG -> (rgba, w, h) or None. 8 bits per channel, no interlacing.
+    Needed when the clipboard only offers PNG (browsers); a DIB already
+    holds raw pixels and is much faster to read."""
     if data[:8] != b"\x89PNG\r\n\x1a\n":
         return None
     pos, idat, pal, trns = 8, bytearray(), None, None
@@ -175,7 +175,7 @@ def decode_png(data):
         prev = line
 
     out = bytearray(w * h * 4)
-    for y, line in enumerate(lines):                 # приводим к RGBA
+    for y, line in enumerate(lines):                 # convert to RGBA
         o, n = y * w * 4, w * 4
         if ctype == 6:
             out[o:o + n] = line
@@ -192,7 +192,7 @@ def decode_png(data):
             for c in range(3):
                 out[o + c:o + n:4] = line[0::2]
             out[o + 3:o + n:4] = line[1::2]
-        else:                                        # палитра
+        else:                                        # palette image
             if not pal:
                 return None
             for x in range(w):
@@ -203,10 +203,10 @@ def decode_png(data):
     return bytes(out), w, h
 
 
-# ---- преобразования картинки: только срезами, поэтому быстро -------------
+# ---- image transforms: slices only, which is what keeps them fast -------
 
 def _row_mirror(row):
-    """Развернуть порядок пикселей в строке RGBA."""
+    """Reverse the pixel order inside one RGBA row."""
     out = bytearray(len(row))
     for c in range(4):
         out[c::4] = row[c::4][::-1]
@@ -228,8 +228,8 @@ def flip_v(rgba, w, h):
 
 
 def rot90(rgba, w, h, cw=True):
-    """Поворот на 90°: строка исходника становится столбцом результата,
-    поэтому пишем шагом через всю ширину — это одна операция на канал."""
+    """Rotate by 90°: a source row becomes a destination column, so we write
+    with a stride of the full width — one operation per channel."""
     stride, nw, nh = w * 4, h, w
     nstride = nw * 4
     out = bytearray(nw * nh * 4)
@@ -245,8 +245,8 @@ def rot90(rgba, w, h, cw=True):
 
 
 def transform_rgba(rgba, w, h, rot=0, fh=False, fv=False):
-    """Отражения, затем поворот. Считаем всегда от оригинала, чтобы
-    многократные щелчки не накапливали ошибку."""
+    """Flips first, then rotation. Always recomputed from the original so
+    repeated clicks never accumulate distortion."""
     if fh:
         rgba = flip_h(rgba, w, h)
     if fv:
@@ -257,7 +257,7 @@ def transform_rgba(rgba, w, h, rot=0, fh=False, fv=False):
 
 
 def shrink_rgba(rgba, w, h, maxw, maxh):
-    """Уменьшение «через пиксель» для превью: тоже срезами."""
+    """Nearest-neighbour downscale for the preview, slices again."""
     k = max(1, -(-w // max(maxw, 1)), -(-h // max(maxh, 1)))
     if k == 1:
         return rgba, w, h
@@ -274,14 +274,14 @@ def shrink_rgba(rgba, w, h, maxw, maxh):
 
 
 def dib_to_rgba(d):
-    """CF_DIB из буфера обмена -> (rgba, w, h) или None."""
+    """CF_DIB from the clipboard -> (rgba, w, h) or None."""
     size, w, h, _planes, bpp, comp = struct.unpack_from("<IiiHHI", d, 0)
     clr_used = struct.unpack_from("<I", d, 32)[0]
     if w <= 0 or bpp not in (24, 32) or comp not in (0, 3):
         return None
     off = size + clr_used * 4
     if comp == 3 and size == 40:
-        off += 12  # маски BITFIELDS идут после классического заголовка
+        off += 12  # BITFIELDS masks follow the classic header
     top_down = h < 0
     h = abs(h)
     stride = ((w * bpp + 31) // 32) * 4
@@ -300,15 +300,15 @@ def dib_to_rgba(d):
             out[o + 2:o + w * 4:4] = row[0:w * 3:3]
             out[o + 3:o + w * 4:4] = b"\xff" * w
     if bpp == 32 and max(out[3::4]) == 0:
-        out[3::4] = b"\xff" * (w * h)  # скрины часто идут с нулевым альфа-каналом
+        out[3::4] = b"\xff" * (w * h)  # screenshots often arrive with a zeroed alpha channel
     return bytes(out), w, h
 
 
 def clipboard_image():
-    """Изображение из буфера обмена -> (rgba, w, h) или None.
+    """Clipboard image -> (rgba, w, h) or None.
 
-    DIB пробуем первым: там пиксели лежат готовыми, а PNG пришлось бы
-    распаковывать построчно на Python — заметно медленнее."""
+    DIB comes first: its pixels are ready to use, while a PNG would have
+    to be unfiltered row by row in Python, which is noticeably slower."""
     u32, k32 = ctypes.windll.user32, ctypes.windll.kernel32
     u32.OpenClipboard.argtypes = [wt.HWND]
     u32.GetClipboardData.restype = wt.HANDLE
@@ -349,7 +349,7 @@ def clipboard_image():
         u32.CloseClipboard()
     return None
 
-# ---------------------------------------------------------------- пути
+# ---------------------------------------------------------------- paths
 
 FROZEN = getattr(sys, "frozen", False)
 APP_DIR = (os.path.dirname(sys.executable) if FROZEN
@@ -357,13 +357,13 @@ APP_DIR = (os.path.dirname(sys.executable) if FROZEN
 
 
 def res_path(name):
-    """Файл, вшитый в сборку (в обычном запуске — рядом со скриптом)."""
+    """A file bundled into the build (next to the script when not frozen)."""
     return os.path.join(getattr(sys, "_MEIPASS", APP_DIR), name)
 
 
 def find_ytdlp():
-    """Внешний yt-dlp.exe, если есть. Рядом с программой — приоритетнее:
-    так свежую версию можно подложить, не пересобирая exe."""
+    """External yt-dlp.exe if there is one. A copy next to the program wins,
+    so a fresh version can be dropped in without rebuilding the exe."""
     local = os.path.join(APP_DIR, "yt-dlp.exe")
     if os.path.exists(local):
         return local
@@ -374,19 +374,19 @@ def find_ytdlp():
         r"%LOCALAPPDATA%\Programs\Python\Python3*\Scripts\yt-dlp.exe"))
     if hits:
         return hits[-1]
-    return None if FROZEN else "yt-dlp"   # в сборке есть встроенный
+    return None if FROZEN else "yt-dlp"   # the frozen build has one bundled
 
 
 YTDLP = find_ytdlp()
 
 
 def ytdlp_cmd():
-    """Чем запускать yt-dlp: внешним exe или собой же в режиме yt-dlp."""
+    """How to invoke yt-dlp: an external exe, or ourselves in yt-dlp mode."""
     return [YTDLP] if YTDLP else [sys.executable, YTDLP_FLAG]
 
 
 def find_ffmpeg():
-    """Рядом с программой, затем в PATH, затем в типовых местах установки."""
+    """Next to the program, then PATH, then the usual install locations."""
     for cand in (os.path.join(APP_DIR, "ffmpeg.exe"),
                  os.path.join(APP_DIR, "ffmpeg", "ffmpeg.exe"),
                  os.path.join(APP_DIR, "ffmpeg", "bin", "ffmpeg.exe")):
@@ -404,12 +404,12 @@ def find_ffmpeg():
     return None
 
 
-APP_ID = "triezo.ytdlpgui"          # своя иконка и группа в панели задач
+APP_ID = "triezo.ytdlpgui"          # own icon and taskbar group
 
 
 def setup_windows_look():
-    """До создания окна: чёткость на масштабированных экранах и своя
-    иконка в панели задач вместо общей питоновской."""
+    """Before the window exists: crisp text on scaled displays, and our own
+    taskbar icon instead of the generic Python one."""
     try:                                   # Windows 8.1+: system DPI aware
         ctypes.windll.shcore.SetProcessDpiAwareness(1)
     except (AttributeError, OSError):
@@ -429,15 +429,15 @@ FFPROBE = (os.path.join(os.path.dirname(FFMPEG), "ffprobe.exe")
 DOWNLOADS = os.path.join(os.path.expanduser("~"), "Downloads")
 
 RESOLUTIONS = ['Best', "2160p (4K)", "1440p", "1080p", "720p", "480p", "360p"]
-# YouTube всё чаще требует «подтвердить, что вы не бот» — лечится cookies
-# залогиненного браузера. Слева подпись, справа имя для --cookies-from-browser.
+# YouTube increasingly asks to "confirm you're not a bot"; cookies from a
+# signed-in browser fix it. Label on the left, --cookies-from-browser name right.
 BROWSERS = [('No cookies', ""), ("Firefox", "firefox"), ("Chrome", "chrome"),
             ("Edge", "edge"), ("Opera", "opera"), ("Brave", "brave")]
 FPS_LIST = ['Same as source', "60", "50", "30", "25", "24", "15"]
 COMPRESSIONS = ['No re-encode', 'Light', 'Medium', 'Strong']
-# mp4: CRF x264 (больше = меньше файл); mp3: битрейт
+# mp4: x264 CRF (higher = smaller file); mp3: bitrate
 CRF = {'Light': "20", 'Medium': "26", 'Strong': "32"}
-# монтажный DNxHR: каждый кадр самостоятельный, Premiere листает без лагов
+# DNxHR for editing: every frame stands alone, so Premiere scrubs smoothly
 DNX = {'No re-encode': "dnxhr_hq", 'Light': "dnxhr_hq",
        'Medium': "dnxhr_sq", 'Strong': "dnxhr_lb"}
 MP3_BR = {'No re-encode': "320k", 'Light': "256k",
@@ -448,27 +448,27 @@ MEDIA_TYPES = [('Video and audio',
                 "*.m4a *.mp3 *.wav *.flac *.opus *.ogg *.aac"),
                ('All files', "*.*")]
 
-# ---------------------------------------------------------------- палитра
-# Три уровня глубины: фон окна темнее карточек, карточки темнее полей ввода.
-# За счёт этого блоки читаются как отдельные, без рамок-«коробок».
+# ---------------------------------------------------------------- palette
+# Three depth levels: window darker than cards, cards darker than fields.
+# That separates blocks visually without drawing boxes around them.
 
-BG = "#141519"          # фон окна
-CARD = "#1c1e24"        # карточка-группа
-FIELD = "#252831"       # поле ввода, кнопка
-FIELD_HI = "#2e323d"    # оно же под курсором
-LINE = "#2b2f38"        # разделители и границы
+BG = "#141519"          # window background
+CARD = "#1c1e24"        # group card
+FIELD = "#252831"       # entry, button
+FIELD_HI = "#2e323d"    # the same under the cursor
+LINE = "#2b2f38"        # separators and borders
 
-FG = "#e9ebef"          # основной текст
-FG_DIM = "#9aa1ad"      # подписи
-MUTE = "#6d7480"        # третьестепенное
+FG = "#e9ebef"          # body text
+FG_DIM = "#9aa1ad"      # captions
+MUTE = "#6d7480"        # least important
 
-ACCENT = "#e5484d"      # фирменный красный (как иконка)
+ACCENT = "#e5484d"      # brand red, same as the icon
 ACCENT_HI = "#f05a5f"
-GREEN = "#4cc38a"       # успех и график скорости
-GREEN_DIM = "#17342a"   # заливка под графиком
+GREEN = "#4cc38a"       # success and the speed graph
+GREEN_DIM = "#17342a"   # fill under the graph
 WARN = "#e2b53e"
 
-F = "Segoe UI"          # шрифты
+F = "Segoe UI"          # fonts
 F_SEMI = "Segoe UI Semibold"
 
 
@@ -477,10 +477,10 @@ class App:
         self.root = root
         self.proc = None
         self.cancelled = False
-        self.busy = False            # занятость, известная главному потоку
+        self.busy = False            # busy flag known to the main thread
         self._reset_progress()
-        self._last_download = None   # путь последнего скачанного файла
-        self._dl_candidate = None    # кандидат, вычисляемый из вывода yt-dlp
+        self._last_download = None   # path of the last downloaded file
+        self._dl_candidate = None    # candidate parsed from yt-dlp output
 
         root.title('YT-DLP GUI — video downloader & converter')
         ico = res_path("app.ico")
@@ -490,12 +490,12 @@ class App:
             except tk.TclError:
                 pass
         root.configure(bg=BG)
-        # на экране с масштабом 125/150% Tk увеличивает шрифты сам (они в
-        # пунктах), а размеры в пикселях надо домножить, иначе окно тесное
+        # at 125/150% scaling Tk grows the fonts itself (they are in points),
+        # but pixel sizes have to be scaled by hand or the window ends up cramped
         self.k = max(root.winfo_fpixels("1i") / 96.0, 1.0)
         w = int(640 * self.k)
-        # высоты хватает на вкладки и нижнюю панель, но окно не должно
-        # вылезать за экран — на ноутбуках с масштабом места мало
+        # tall enough for the tabs and the bottom panel, but the window must not
+        # run off the screen: scaled laptop displays leave little room
         h = min(int(790 * self.k), root.winfo_screenheight() - int(70 * self.k))
         root.geometry(f"{w}x{h}")
         root.minsize(int(560 * self.k), int(520 * self.k))
@@ -507,12 +507,12 @@ class App:
         root.protocol("WM_DELETE_WINDOW", self.on_close)
 
         if not FFMPEG:
-            # без ffmpeg не склеиваются 1080p+ и не работает конвертация —
-            # получателю сборки надо сказать об этом сразу, а не по факту
+            # without ffmpeg there is no merging of 1080p+ and no conversion at all,
+            # so whoever runs the build should hear it up front, not after the fact
             self.set_status('ffmpeg not found: basic video only, no conversion. Put ffmpeg.exe next to the program', WARN)
 
     def _center(self):
-        """Открываться по центру экрана, а не в углу по усмотрению Windows."""
+        """Open centred on screen instead of wherever Windows decides."""
         self.root.update_idletasks()
         w, h = self.root.winfo_width(), self.root.winfo_height()
         x = (self.root.winfo_screenwidth() - w) // 2
@@ -523,7 +523,7 @@ class App:
 
     @staticmethod
     def _drop_element(layout, name):
-        """Убрать элемент из разметки ttk-стиля, сохранив вложенных детей."""
+        """Drop an element from a ttk style layout, keeping its children."""
         out = []
         for el, opts in layout:
             opts = dict(opts)
@@ -531,7 +531,7 @@ class App:
             if kids:
                 opts["children"] = App._drop_element(kids, name)
             if el == name:
-                out.extend(opts.get("children", []))   # детей поднимаем наверх
+                out.extend(opts.get("children", []))   # lift its children up a level
             else:
                 out.append((el, opts))
         return out
@@ -541,9 +541,9 @@ class App:
         s.theme_use("clam")
         s.configure(".", background=BG, foreground=FG, fieldbackground=FIELD,
                     bordercolor=LINE, lightcolor=LINE, darkcolor=LINE)
-        # Тема clam рисует вокруг подписи пунктирную рамку фокуса — по клику
-        # она выглядит как «выделенный текст». Выкидываем этот элемент из
-        # разметки вкладок и кнопок: фокус остаётся, пунктир пропадает.
+        # The clam theme draws a dotted focus ring around the label, which on
+        # click looks like selected text. Drop that element from the tab and
+        # button layouts: focus still works, the dotted ring is gone.
         for style, elem in (("TNotebook.Tab", "Notebook.focus"),
                             ("TButton", "Button.focus")):
             try:
@@ -553,7 +553,7 @@ class App:
         s.configure("TFrame", background=BG)
         s.configure("Card.TFrame", background=CARD)
         s.configure("TLabel", background=BG, foreground=FG, font=(F, 10))
-        # подписи внутри карточек — фон карточки, иначе видны прямоугольники
+        # labels inside cards need the card background, or rectangles show up
         s.configure("Card.TLabel", background=CARD, foreground=FG, font=(F, 10))
         s.configure("Section.TLabel", background=CARD, foreground=FG_DIM,
                     font=(F_SEMI, 9))
@@ -562,7 +562,7 @@ class App:
         s.configure("Title.TLabel", background=BG, foreground=FG, font=(F_SEMI, 15))
         s.configure("Ver.TLabel", background=BG, foreground=MUTE, font=(F, 9))
 
-        # кнопки: обычная, тихая (в карточке) и главная
+        # buttons: plain, quiet (inside a card) and primary
         s.configure("TButton", font=(F, 10), padding=(12, 7),
                     background=FIELD, foreground=FG, borderwidth=0, relief="flat")
         s.map("TButton", background=[("pressed", LINE), ("active", FIELD_HI)],
@@ -602,8 +602,8 @@ class App:
               selectbackground=[("readonly", FIELD)],
               selectforeground=[("readonly", FG)],
               arrowcolor=[("disabled", LINE), ("active", FG)])
-        # выпадающий список комбобокса — обычный tk-Listbox, стилю ttk не
-        # подчиняется, красим через базу опций
+        # a combobox popup is a plain tk Listbox and ignores ttk styling,
+        # so it gets coloured through the option database
         self.root.option_add("*TCombobox*Listbox.background", FIELD)
         self.root.option_add("*TCombobox*Listbox.foreground", FG)
         self.root.option_add("*TCombobox*Listbox.selectBackground", ACCENT)
@@ -612,8 +612,8 @@ class App:
         self.root.option_add("*TCombobox*Listbox.font", "{Segoe UI} 10")
         s.configure("TNotebook", background=BG, borderwidth=0,
                     tabmargins=(0, 6, 0, 0))
-        # выделенная вкладка: светлее фона, ярче текст и акцентная полоса
-        # сверху — иначе на тёмной теме её почти не отличить от соседей
+        # selected tab: lighter than the rest, brighter text and an accent bar
+        # on top, otherwise it is nearly indistinguishable on a dark theme
         s.configure("TNotebook.Tab", background="#191b21", foreground=MUTE,
                     font=(F_SEMI, 10), padding=(18, 9), borderwidth=2,
                     bordercolor=BG, lightcolor=BG, darkcolor=BG)
@@ -622,19 +622,19 @@ class App:
               foreground=[("selected", "#ffffff"), ("active", FG_DIM)],
               lightcolor=[("selected", ACCENT)],
               bordercolor=[("selected", ACCENT)],
-              # clam добавляет выделенной вкладке свой padding, из-за чего
-              # ярлычки скачут вбок при переключении — держим его одинаковым
+              # clam adds its own padding to the selected tab, which makes the
+              # labels jump sideways when switching, so we pin it to one value
               padding=[("selected", (18, 9)), ("!selected", (18, 9))])
         for name, color in [("Idle", LINE), ("Run", GREEN), ("Err", ACCENT)]:
             s.configure(f"{name}.Horizontal.TProgressbar", background=color,
                         troughcolor="#1a1c22", borderwidth=0, thickness=6)
 
-    # --- кирпичики оформления -----------------------------------------
+    # --- building blocks of the look ----------------------------------
 
-    P = 18                      # внутренний отступ карточки
+    P = 18                      # inner padding of a card
 
     def _sec(self, parent, text, top=13):
-        """Заголовок группы: приглушённый, мельче основного текста."""
+        """Group heading: dimmer and smaller than body text."""
         ttk.Label(parent, text=text, style="Section.TLabel").pack(
             anchor="w", padx=self.P, pady=(top, 6))
 
@@ -644,8 +644,9 @@ class App:
         return r
 
     def _entry(self, parent, var, big=False, hint=""):
-        """Поле ввода в рамке, которая на фокусе загорается акцентом.
-        hint — серая подсказка внутри поля вместо отдельной строчки снизу."""
+        """An entry in a border that lights up in the accent colour on focus.
+        hint is grey placeholder text inside the field, which saves the extra
+        caption line underneath."""
         wrap = tk.Frame(parent, bg=LINE)
         e = tk.Entry(wrap, textvariable=var, font=(F, 11 if big else 10),
                      bg=FIELD, fg=FG, insertbackground=ACCENT,
@@ -655,8 +656,8 @@ class App:
         e.bind("<FocusOut>", lambda _ev: wrap.configure(bg=LINE))
         self._entry_hotkeys(e)
         if hint:
-            # подсказку кладём отдельной меткой поверх поля: значение
-            # переменной остаётся чистым, читать её можно как обычно
+            # the placeholder is a separate label on top of the field, so the
+            # variable stays clean and can be read as usual
             lbl = tk.Label(e, text=hint, bg=FIELD, fg=MUTE, font=(F, 9))
 
             def upd(*_a):
@@ -667,8 +668,8 @@ class App:
             var.trace_add("write", upd)
             e.bind("<FocusIn>", lambda _ev: lbl.place_forget(), add="+")
             e.bind("<FocusOut>", lambda _ev: upd(), add="+")
-            # клик по самой подсказке метка съедает — передаём фокус полю,
-            # иначе по тексту подсказки поле «не нажимается»
+            # the label swallows clicks on the placeholder, so hand focus to the
+            # entry, otherwise the field feels dead where the hint text is
             lbl.bind("<Button-1>", lambda _ev: e.focus_set())
             upd()
         return wrap, e
@@ -691,10 +692,10 @@ class App:
         self._build_convert_tab(tab_cv)
         self._build_image_tab(tab_im)
 
-        # Ctrl+V на вкладке «Картинка» (вне полей ввода) вставляет из буфера
+        # Ctrl+V on the Image tab, outside entries, pastes from the clipboard
         self.root.bind("<Control-KeyPress>", self._root_ctrl)
 
-        # --- общие прогресс, статус и лог
+        # --- shared progress bar, status and log
         self.bar = ttk.Progressbar(f, maximum=100,
                                    style="Idle.Horizontal.TProgressbar")
         self.bar.pack(fill="x", padx=14, pady=(16, 8))
@@ -715,17 +716,17 @@ class App:
                            insertbackground=MUTE)
         self.log.pack(fill="both", expand=True, padx=14, pady=(12, 14))
 
-    # ------------------------------------------------------ перетаскивание
+    # ------------------------------------------------------ drag-and-drop
 
     def _setup_dnd(self):
-        """Цели вешаем на виджеты, а не на корень: методы перетаскивания
-        появляются только у потомков BaseWidget."""
+        """Targets go on widgets rather than the root: the drag-and-drop methods
+        only exist on BaseWidget subclasses."""
         self.dnd_ok = False
         if TkinterDnD is None:
             return
         try:
             TkinterDnD._require(self.root)
-        except Exception:                     # tkdnd не подгрузился
+        except Exception:                     # tkdnd failed to load
             return
         for wdg in (self._tab_dl, self._tab_cv, self._tab_im, self.preview,
                     self.log):
@@ -737,8 +738,8 @@ class App:
             self.dnd_ok = True
 
     def _on_drop(self, ev):
-        """Принесённое мышью: файлы или текст. Что делать — зависит
-        от того, какая вкладка сейчас открыта."""
+        """Whatever was dragged in: files or text. What happens next depends on
+        the tab that is currently open."""
         try:
             items = [str(p) for p in self.root.tk.splitlist(ev.data)]
         except tk.TclError:
@@ -760,7 +761,7 @@ class App:
             self.nb.select(2)
             self._load_image_file(path)
             return
-        # файл на вкладке загрузки конвертировать логичнее, чем ничего
+        # a file dropped on the Download tab is more useful sent to Convert
         self.src.set(path)
         self.cfolder.set(os.path.dirname(path))
         self.nb.select(1)
@@ -777,8 +778,8 @@ class App:
             self.set_status('Dropped item is not a file or a link', WARN)
 
     def _load_image_file(self, path):
-        """Картинка из файла. PNG читаем сами, остальные форматы —
-        через ffmpeg, своего декодера JPEG у нас нет."""
+        """An image from disk. PNG we decode ourselves; other formats go through
+        ffmpeg, since we have no JPEG decoder of our own."""
         try:
             data = open(path, "rb").read()
         except OSError as e:
@@ -803,7 +804,7 @@ class App:
             return
         self._set_image(got, os.path.basename(path))
 
-    # ------------------------------------------------------------ график
+    # ------------------------------------------------------------ graph
 
     def _toggle_graph(self):
         opened = not self.graph_open
@@ -829,7 +830,7 @@ class App:
         top, bot = 18, h - 6
         peak = max(hist) if hist else 0
 
-        for i in range(1, 4):                     # сетка
+        for i in range(1, 4):                     # grid
             y = top + (bot - top) * i / 4
             c.create_line(10, y, w - 10, y, fill="#1e222a")
 
@@ -839,8 +840,8 @@ class App:
             return
 
         scale = peak * 1.15 or 1
-        # растягиваем на всю ширину: пока точек мало, график всё равно
-        # занимает панель целиком, а не жмётся к правому краю
+        # stretch across the full width: with few points the graph still fills
+        # the panel instead of hugging the right edge
         step = (w - 20) / max(len(hist) - 1, 1)
         x0 = 10
         pts = [(x0 + i * step, bot - (v / scale) * (bot - top))
@@ -858,7 +859,7 @@ class App:
         c.create_text(w - 12, 10, anchor="e", fill=GREEN, font=(F_SEMI, 9),
                       text=self._fmt_rate(hist[-1]))
 
-    # ------------------------------------------------------------ вкладки
+    # ------------------------------------------------------------ tabs
 
     def _build_download_tab(self, f):
         self._sec(f, 'Video link', top=14)
@@ -891,8 +892,8 @@ class App:
 
         row = self._row(f, top=12)
         ttk.Label(row, text="Cookies", style="Card.TLabel").pack(side="left")
-        # в реестре могло остаться значение от старой русской версии —
-        # берём его, только если оно есть в текущем списке
+        # the registry may still hold a value from the old Russian build,
+        # so use it only if it exists in the current list
         saved = load_reg("cookies")
         names = [b[0] for b in BROWSERS]
         self.cookies = tk.StringVar(value=saved if saved in names else names[0])
@@ -919,7 +920,7 @@ class App:
                               command=self.start)
         self.btn.pack(fill="x", padx=self.P, pady=(16, 0))
 
-        # --- спойлер с графиком скорости: раскрывается вниз
+        # --- speed graph spoiler, expands downwards
         self.graph_open = False
         head = tk.Frame(f, bg=CARD)
         head.pack(fill="x", padx=self.P, pady=(14, 0))
@@ -935,7 +936,7 @@ class App:
         self.graph = tk.Canvas(f, height=96, bg="#101216", relief="flat",
                                highlightthickness=0)
         self.graph.bind("<Configure>", lambda _e: self._draw_graph())
-        tk.Frame(f, bg=CARD, height=14).pack(fill="x")   # нижний воздух
+        tk.Frame(f, bg=CARD, height=14).pack(fill="x")   # breathing room at the bottom
         if load_reg("graph") == "1":
             self._toggle_graph()
 
@@ -945,12 +946,12 @@ class App:
         self.src = tk.StringVar()
         wrap, e = self._entry(row, self.src, hint='path to a file on your computer')
         wrap.pack(side="left", fill="x", expand=True)
-        # add="+" обязателен: без него эта привязка затирает подсветку рамки
-        # и скрытие подсказки, навешенные в _entry
+        # add="+" is required: without it this binding wipes out the border
+        # highlight and the placeholder hiding set up in _entry
         e.bind("<FocusIn>", lambda _e: self._refresh_suggestion(), add="+")
         ttk.Button(row, text='Browse…', command=self.browse_src).pack(side="left", padx=(8, 0))
 
-        # кликабельная подсказка: подставить только что скачанный файл
+        # clickable hint: fill in the file that was just downloaded
         self.suggest = tk.Label(f, text="", bg=CARD, fg=ACCENT, cursor="hand2",
                                 font=(F, 9), anchor="w", justify="left")
         self.suggest.bind("<Button-1>", lambda _e: self._use_last_download())
@@ -984,7 +985,7 @@ class App:
         self.cfps_box.pack(side="left", padx=(10, 0))
 
         self.hint = ttk.Label(f, text="", style="Hint.TLabel", wraplength=540,
-                              justify="left")   # пакуется только когда есть текст
+                              justify="left")   # packed only when it has text
 
         self._sec(f, 'Save to')
         row = self._row(f)
@@ -1023,11 +1024,11 @@ class App:
         self.preview.pack(fill="both", expand=True)
         self.preview.bind("<Button-1>", lambda _e: self.paste_image())
         self._preview_img = None
-        self._img_orig = None       # (rgba, w, h) как вставили — база правок
-        self.img_rgba = None        # текущая картинка после преобразований
+        self._img_orig = None       # (rgba, w, h) as pasted: the base every edit starts from
+        self.img_rgba = None        # current image after transforms
         self.img_w = self.img_h = 0
 
-        # --- отражения и поворот
+        # --- flips and rotation
         row = self._row(f, top=10)
         self.tr_btns = []
         for text, cmd in (('⇋  Flip H', lambda: self._flip("h")),
@@ -1101,11 +1102,11 @@ class App:
             self.hint.pack_forget()
 
     def _entry_hotkeys(self, entry):
-        """Ctrl+V/C/X/A по физическим клавишам — работает на любой раскладке,
-        включая кириллическую (стандартные бинды tkinter на ней молчат).
-        Плюс контекстное меню по правой кнопке."""
+        """Ctrl+V/C/X/A bound to physical keys, so they work on any keyboard
+        layout, including Cyrillic where tkinter's stock bindings stay silent.
+        Plus a right-click context menu."""
         def on_ctrl(ev):
-            kc = ev.keycode  # физическая клавиша, не зависит от раскладки
+            kc = ev.keycode  # physical key, independent of the keyboard layout
             if kc == 86:                       # V
                 self._insert_clip(entry)
             elif kc == 67:                     # C
@@ -1143,7 +1144,7 @@ class App:
         return text.strip()
 
     def _insert_clip(self, entry):
-        """Вставить из буфера в позицию курсора (заменяя выделение)."""
+        """Paste at the caret, replacing the selection."""
         text = self._get_clip()
         if not text:
             return
@@ -1152,7 +1153,7 @@ class App:
         entry.insert("insert", text)
 
     def _text_hotkeys(self, txt):
-        """Ctrl+V/C/X/A для tk.Text на любой раскладке."""
+        """Ctrl+V/C/X/A for tk.Text on any keyboard layout."""
         def on_ctrl(ev):
             kc = ev.keycode
             if kc == 86:
@@ -1175,7 +1176,7 @@ class App:
         txt.bind("<Control-KeyPress>", on_ctrl)
 
     def _root_ctrl(self, ev):
-        # Ctrl+V вне полей ввода на вкладке «Картинка» — вставить изображение
+        # Ctrl+V outside entries on the Image tab pastes the picture
         if ev.keycode != 86:
             return
         if self.nb.index(self.nb.select()) != 2:
@@ -1192,7 +1193,7 @@ class App:
         else:
             self.set_status('Clipboard is empty or holds no text', WARN)
 
-    # ------------------------------------------------------------ картинка
+    # ------------------------------------------------------------ image
 
     def paste_image(self):
         try:
@@ -1205,7 +1206,7 @@ class App:
         self._set_image(res)
 
     def _set_image(self, res, source=""):
-        """Общий путь для буфера обмена и перетаскивания."""
+        """Shared path for both the clipboard and drag-and-drop."""
         self._img_orig = res
         self.rot.set("0°")
         self._flip_h = self._flip_v = False
@@ -1215,7 +1216,7 @@ class App:
         self.set_status(f"Loaded {source} — ready to save" if source
                         else 'Image pasted — ready to save')
 
-    # --- отражения и поворот ------------------------------------------
+    # --- flips and rotation -------------------------------------------
 
     def _flip(self, axis):
         if not self._img_orig:
@@ -1232,7 +1233,7 @@ class App:
         self._apply_transform()
 
     def _apply_transform(self):
-        """Пересчёт всегда от оригинала: повторные щелчки не копят искажения."""
+        """Always recomputed from the original, so clicks never pile up losses."""
         if not self._img_orig:
             return
         rgba, w, h = self._img_orig
@@ -1245,8 +1246,8 @@ class App:
         self._show_preview()
 
     def _show_preview(self):
-        """Превью кодируем уже уменьшенным — полноразмерный PNG на каждый
-        щелчок сжимался бы почти секунду."""
+        """The preview is encoded already downscaled: compressing a full-size PNG
+        on every click would take close to a second."""
         rgba, w, h = self.img_rgba, self.img_w, self.img_h
         box = self.preview.winfo_width() or 560
         small, sw, sh = shrink_rgba(rgba, w, h, max(box - 8, 80), 142)
@@ -1291,7 +1292,7 @@ class App:
             out = os.path.join(folder, f"{name} ({n}).png")
             n += 1
         try:
-            # полноразмерный PNG собираем только здесь, а не на каждый поворот
+            # the full-size PNG is built only here, not on every rotation
             with open(out, "wb") as fp:
                 fp.write(encode_png(self.img_w, self.img_h, self.img_rgba))
         except OSError as e:
@@ -1329,7 +1330,7 @@ class App:
             self.cfolder.set(os.path.dirname(p))
 
     def _refresh_suggestion(self):
-        """Показать/скрыть подсказку с последним скачанным файлом."""
+        """Show or hide the hint pointing at the last downloaded file."""
         if self._last_download and os.path.isfile(self._last_download):
             name = os.path.basename(self._last_download)
             if len(name) > 60:
@@ -1371,7 +1372,7 @@ class App:
 
     def _job_begin(self):
         self.cancelled = False
-        self.busy = True  # ставится синхронно: self.proc появится лишь в потоке
+        self.busy = True  # set synchronously: self.proc only appears later, inside the thread
         self.btn.configure(state="disabled")
         self.cbtn.configure(state="disabled")
         self.upd_btn.configure(state="disabled")
@@ -1400,22 +1401,22 @@ class App:
         name = re.sub(r'[\\/:*?"<>|]', "", name).strip().rstrip(".")
         return re.sub(r"\.(mp4|mov|mp3|wav|mkv|webm|m4a)$", "", name, flags=re.I)
 
-    # ------------------------------------------------------------ загрузка
+    # ------------------------------------------------------------ download
 
     def build_cmd(self, url):
         folder = self.folder.get().strip() or DOWNLOADS
         name = self._clean_name(self.fname.get().strip())
         if name:
-            name = name.replace("%", "%%")  # чтобы yt-dlp не принял за шаблон
+            name = name.replace("%", "%%")  # so yt-dlp does not read it as a template
             if self.playlist.get():
-                name += " %(playlist_index)s"  # иначе файлы плейлиста затрут друг друга
+                name += " %(playlist_index)s"  # otherwise playlist items overwrite each other
             template = name + ".%(ext)s"
         else:
             template = "%(title)s.%(ext)s"
         cmd = ytdlp_cmd() + ["--newline", "--no-mtime",
                              "-o", os.path.join(folder, template),
-                             # свои числа вместо готовой строки: ETA у yt-dlp
-                             # считается по текущему куску и потому скачет
+                             # raw numbers instead of a ready-made line: yt-dlp's ETA is computed
+                             # from the current chunk and therefore jumps around
                              "--progress-template",
                              "download:@P|%(progress.downloaded_bytes)s"
                              "|%(progress.total_bytes)s"
@@ -1433,8 +1434,8 @@ class App:
         fmt = self.fmt.get()
         if fmt == "mp4":
             cmd += ["-f", "bestvideo+bestaudio/best"]
-            # res = меньшая сторона кадра, поэтому вертикальные видео (9:16)
-            # не теряют качество; при равном качестве предпочитаем h264/aac
+            # res means the shorter side of the frame, so vertical videos (9:16)
+            # keep their quality; on a tie prefer h264/aac
             m = re.match(r"(\d+)", self.res.get())
             res_key = f"res:{m.group(1)}" if m else "res"
             cmd += ["-S", f"{res_key},vcodec:h264,acodec:m4a"]
@@ -1448,7 +1449,7 @@ class App:
         return cmd
 
     def start(self):
-        if self.busy:  # Enter в поле ссылки не блокируется состоянием кнопки
+        if self.busy:  # Enter in the link field is not gated by the button state
             return
         url = self.url.get().strip()
         if not url.lower().startswith(("http://", "https://")):
@@ -1493,8 +1494,8 @@ class App:
             self._ui(self._job_end, rc, '✔ Done! Saved to: ' + folder)
 
     def _track_output_path(self, line):
-        """Вылавливаем итоговый путь скачанного файла из вывода yt-dlp.
-        Последнее совпадение в потоке — итоговое (после слияния/извлечения)."""
+        """Pick the final output path out of yt-dlp's own output. The last match
+        in the stream is the real one, after merging or audio extraction."""
         for pat in (r'\[Merger\] Merging formats into "(.+?)"',
                     r'\[ExtractAudio\] Destination: (.+)$',
                     r'\[download\] Destination: (.+)$',
@@ -1504,11 +1505,11 @@ class App:
                 self._dl_candidate = m.group(1).strip()
                 return
 
-    # --- собственный счёт скорости и остатка ---------------------------
+    # --- our own speed and time-left maths -----------------------------
 
     @staticmethod
     def _num(s):
-        """Число из поля шаблона; 'NA' и мусор -> None."""
+        """A number from a progress-template field; 'NA' and junk become None."""
         try:
             v = float(s)
         except (TypeError, ValueError):
@@ -1529,19 +1530,19 @@ class App:
             return f"{sec // 3600}:{sec // 60 % 60:02d}:{sec % 60:02d}"
         return f"{sec // 60:02d}:{sec % 60:02d}"
 
-    SPEED_POINTS = 120           # ширина истории графика в отсчётах
+    SPEED_POINTS = 120           # graph history width, in samples
 
     def _reset_progress(self):
-        self._dl_streams = 1     # сколько файлов качается (видео + звук = 2)
-        self._dl_index = 0       # какой идёт сейчас
+        self._dl_streams = 1     # how many files are being fetched (video + audio = 2)
+        self._dl_index = 0       # which one is running now
         self._dl_samples = deque()
         self._dl_last = -1.0
-        self._pl_index = self._pl_total = 0   # позиция в плейлисте
+        self._pl_index = self._pl_total = 0   # position within the playlist
         self._speed_hist = deque(maxlen=self.SPEED_POINTS)
-        self._graph_at = 0.0     # когда последний раз перерисовывали
+        self._graph_at = 0.0     # when the graph was last redrawn
 
     def _new_media_item(self):
-        """Начался следующий ролик: счётчик видео/звук — заново."""
+        """A new item started: reset the video/audio counter."""
         self._dl_index = 0
         self._dl_last = -1.0
         self._dl_samples.clear()
@@ -1554,13 +1555,13 @@ class App:
             return
         now = time.monotonic()
 
-        # счётчик байт пошёл сначала — значит начался следующий поток
+        # the byte counter restarted, so the next stream has begun
         if done < self._dl_last:
             self._dl_index += 1
             self._dl_samples.clear()
         self._dl_last = done
 
-        # окно ~6 секунд: сглаживает рывки фрагментов, но не врёт при обрыве
+        # a ~6 second window smooths fragment bursts without lying after a stall
         self._dl_samples.append((now, done))
         while len(self._dl_samples) > 2 and now - self._dl_samples[0][0] > 6:
             self._dl_samples.popleft()
@@ -1589,8 +1590,8 @@ class App:
         parts = [f"{name}: {pct:.1f}%" if pct is not None else name]
         if rate:
             parts.append(self._fmt_rate(rate))
-            # оценка размера бывает занижена: скачано может превысить total,
-            # и тогда «осталось» показывать уже нечего
+            # the size estimate can be low, so downloaded may exceed total and
+            # then there is nothing left to report
             left = max((total or 0) - done, 0)
             if left > 0:
                 parts.append('left ' + self._fmt_time(left / rate))
@@ -1600,7 +1601,7 @@ class App:
             parts.append(f"video {self._pl_index} of {self._pl_total}")
         self.set_status("  •  ".join(parts))
 
-        # график: копим точки и перерисовываем не чаще 4 раз в секунду
+        # graph: collect points, redraw at most four times per second
         if rate:
             self._speed_hist.append(rate)
             if self.graph_open and now - self._graph_at > 0.25:
@@ -1611,18 +1612,18 @@ class App:
         if line.startswith("@P|"):
             self._on_progress(line[3:].split("|"))
             return
-        # позиция в плейлисте: «Downloading item 2 of 12»
+        # playlist position: "Downloading item 2 of 12"
         m = re.search(r"Downloading item (\d+) of (\d+)", line)
         if m:
             self._pl_index, self._pl_total = int(m.group(1)), int(m.group(2))
-        # сколько файлов будет: «Downloading 1 format(s): 137+140» -> два.
-        # Строка приходит на КАЖДЫЙ ролик, поэтому здесь же обнуляем счётчик
-        # видео/звук — иначе на плейлисте он растёт до «file 5 of 2»
+        # how many files to expect: "Downloading 1 format(s): 137+140" -> two.
+        # This line arrives for EVERY item, so the video/audio counter is reset
+        # here as well; otherwise a playlist creeps up to "file 5 of 2"
         m = re.search(r"Downloading \d+ format\(s\):\s*(\S+)", line)
         if m:
             self._dl_streams = len(m.group(1).split("+"))
             self._new_media_item()
-        # запасной разбор, если --progress-template не поддержан
+        # fallback parsing if --progress-template is not supported
         m = re.search(r"\[download\]\s+([\d.]+)%", line)
         if m:
             pct = float(m.group(1))
@@ -1634,7 +1635,7 @@ class App:
             self.set_status('Processing (ffmpeg)…')
         self.log_line(line)
 
-    # ------------------------------------------------------------ конвертация
+    # ------------------------------------------------------------ convert
 
     def build_ffmpeg_cmd(self, src, out):
         fmt = self.cfmt.get()
@@ -1645,17 +1646,17 @@ class App:
             scale = None
             m = re.match(r"(\d+)", self.cres.get())
             if m:
-                # ограничиваем МЕНЬШУЮ сторону кадра: горизонтальное видео —
-                # по высоте, вертикальное (9:16) — по ширине; меньшее видео
-                # не растягиваем, стороны делаем чётными
+                # clamp the SHORTER side of the frame: landscape by height, portrait
+                # (9:16) by width; never upscale a smaller video, and keep both
+                # dimensions even
                 h = m.group(1)
                 scale = (f"scale="
                          f"'if(gt(iw,ih),-2,2*trunc(min({h}\\,iw)/2))':"
                          f"'if(gt(iw,ih),2*trunc(min({h}\\,ih)/2),-2)'")
             fps = self.cfps.get() if re.match(r"\d", self.cfps.get()) else None
             if fmt == "mov":
-                # DNxHR: all-intra, жёстко постоянный FPS и несжатый звук —
-                # то, что монтажки любят больше всего
+                # DNxHR: all-intra, hard constant frame rate and uncompressed audio,
+                # which is what editors like most
                 if scale:
                     cmd += ["-vf", scale]
                 if fps:
@@ -1666,7 +1667,7 @@ class App:
             elif comp == 'No re-encode' and not scale and not fps:
                 cmd += ["-c", "copy"]
             else:
-                crf = CRF.get(comp, "20")  # «без пережатия» + масштаб => высокое качество
+                crf = CRF.get(comp, "20")  # "no re-encode" plus scaling means high quality
                 if scale:
                     cmd += ["-vf", scale]
                 if fps:
@@ -1705,13 +1706,13 @@ class App:
             out = os.path.join(folder, f"{name}_conv.{fmt}")
         n = 1
         base = out
-        while os.path.exists(out):  # не затираем существующие файлы
+        while os.path.exists(out):  # never overwrite existing files
             root_, ext_ = os.path.splitext(base)
             out = f"{root_} ({n}){ext_}"
             n += 1
 
-        # команду собираем ЗДЕСЬ, в главном потоке: build_ffmpeg_cmd читает
-        # tk-переменные, а обращаться к ним из фонового потока нельзя
+        # the command is built HERE, on the main thread: build_ffmpeg_cmd reads
+        # tk variables, and those must not be touched from a worker thread
         cmd = self.build_ffmpeg_cmd(src, out)
 
         self._job_begin()
@@ -1753,7 +1754,7 @@ class App:
                     except ValueError:
                         continue
                     self._ui(self._on_conv_progress, sec, duration, speed)
-                elif "=" not in line:  # не служебная строка прогресса — значит ошибка
+                elif "=" not in line:  # not a progress line, so it must be an error
                     self._ui(self.log_line, line)
             rc = self.proc.wait()
         except FileNotFoundError:
@@ -1763,9 +1764,9 @@ class App:
             if rc == 0:
                 self._ui(self.log_line, 'Saved: ' + out)
             elif os.path.exists(out):
-                # недоделанный файл убираем и при ошибке, и при отмене:
-                # раньше после отмены на диске оставался битый файл,
-                # который выглядел как готовый
+                # remove the half-written file on error and on cancel alike:
+                # cancelling used to leave a broken file on disk that looked
+                # perfectly finished
                 try:
                     os.remove(out)
                 except OSError:
@@ -1783,17 +1784,18 @@ class App:
             text += f"  •  speed {speed}"
         self.set_status(text)
 
-    # ------------------------------------------------------------ обновление
+    # ------------------------------------------------------------ update
 
     @staticmethod
     def _python_for_ytdlp():
-        """Интерпретатор, которому принадлежит yt-dlp.exe (…\\Scripts\\yt-dlp.exe)."""
+        """The interpreter that owns yt-dlp.exe (...\\Scripts\\yt-dlp.exe)."""
         cand = os.path.join(os.path.dirname(os.path.dirname(YTDLP)), "python.exe")
         return cand if os.path.exists(cand) else sys.executable
 
     def _upd_cmd(self):
-        """Чем обновляться. В exe-сборке pip недоступен: там либо обновляем
-        подложенный рядом yt-dlp.exe, либо честно говорим, что нечем."""
+        """How to update. pip is not available inside the exe build, so there we
+        either update a yt-dlp.exe dropped next to us, or say plainly that we
+        cannot."""
         if YTDLP and (FROZEN or YTDLP.lower().endswith("yt-dlp.exe")
                       and not os.path.exists(self._python_for_ytdlp())):
             return [YTDLP, "-U"]
@@ -1847,18 +1849,18 @@ class App:
         self.bar.configure(mode="determinate", value=0)
         self._job_end(rc, '✔ yt-dlp updated' + (f" — version {ver}" if ver else ""))
 
-    # ------------------------------------------------------------ отмена
+    # ------------------------------------------------------------ cancel
 
     def _ui(self, fn, *args):
-        """Обновление интерфейса из рабочего потока. После закрытия окна
-        Tk уже мёртв — тогда просто молчим, а не сыплем трейсбеком."""
+        """Update the UI from a worker thread. Once the window is closed Tk is
+        gone, and then we keep quiet instead of spraying tracebacks."""
         try:
             self.root.after(0, fn, *args)
         except (tk.TclError, RuntimeError):
             pass
 
     def _kill_proc(self):
-        """yt-dlp может держать дочерний ffmpeg — валим всё дерево."""
+        """yt-dlp may hold a child ffmpeg, so kill the whole process tree."""
         p = self.proc
         if not p:
             return
@@ -1873,8 +1875,8 @@ class App:
         self._kill_proc()
 
     def on_close(self):
-        """Без этого закрытое окно оставляет yt-dlp и ffmpeg работать в фоне:
-        дочерние процессы не умирают вместе с родителем."""
+        """Without this, closing the window leaves yt-dlp and ffmpeg running in
+        the background: child processes do not die with their parent."""
         if self.busy and not messagebox.askokcancel(
                 'Quit', 'A job is still running. Stop it and quit?'):
             return

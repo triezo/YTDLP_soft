@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Закрытие окна во время работы не должно оставлять ffmpeg в фоне."""
+"""Closing the window mid-job must not leave ffmpeg running."""
 import os as _os
 _ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 APP = _os.path.join(_ROOT, "ytdlp_gui.pyw")
@@ -27,7 +27,7 @@ subprocess.run([m.FFMPEG, "-y", "-loglevel", "error", "-f", "lavfi",
                 "-c:v", "libx264", "-preset", "ultrafast", src], check=True)
 
 base = ffmpeg_count()
-print("ffmpeg в системе до старта:", base)
+print("ffmpeg processes before start:", base)
 
 r = tk.Tk(); r.withdraw()
 app = m.App(r)
@@ -40,16 +40,16 @@ for _ in range(100):
     if ffmpeg_count() > base:
         break
 during = ffmpeg_count()
-print("ffmpeg во время конвертации:", during)
-assert during > base, "конвертация не запустилась"
+print("ffmpeg while converting:", during)
+assert during > base, "conversion did not start"
 
-# имитируем крестик: сначала без подтверждения (busy) — окно остаётся
-app.busy = False           # чтобы не ждать диалога в автотесте
+# emulate the close button; clear busy so no dialog blocks the test
+app.busy = False           # no confirmation dialog in an automated run
 app.on_close()
 time.sleep(1.5)
 after = ffmpeg_count()
-print("ffmpeg после закрытия окна:", after)
-assert after <= base, "ffmpeg остался работать в фоне!"
+print("ffmpeg after closing the window:", after)
+assert after <= base, "ffmpeg kept running in the background!"
 
 for f in os.listdir(work):
     try:

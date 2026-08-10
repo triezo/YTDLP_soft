@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Плейлист: что показывает статус на втором и третьем ролике."""
+"""Playlist: what the status says on the second and third item."""
 import os as _os
 _ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 APP = _os.path.join(_ROOT, "ytdlp_gui.pyw")
@@ -27,17 +27,17 @@ def feed(done, total, dt=0.5):
 
 
 VID, AUD = 60 * MB, 5 * MB
-for item in (1, 2, 3):                       # три ролика плейлиста
+for item in (1, 2, 3):                       # three playlist items
     app._on_line(f"[download] Downloading item {item} of 3")
     app._on_line("[info] Downloading 1 format(s): 137+140")
-    for i in range(1, 7):                    # видео
+    for i in range(1, 7):                    # video
         feed(i * 10 * MB, VID)
-    print(f"ролик {item}, видео -> {statuses[-1]}")
-    assert "Video" in statuses[-1], f"на ролике {item} видео названо неверно"
+    print(f"item {item}, video -> {statuses[-1]}")
+    assert "Video" in statuses[-1], f"item {item}: the video stage is mislabelled"
     assert f"video {item} of 3" in statuses[-1]
-    for i in range(1, 5):                    # звук
+    for i in range(1, 5):                    # audio
         feed(i * 1 * MB, AUD)
-    print(f"ролик {item}, звук  -> {statuses[-1]}")
+    print(f"item {item}, audio -> {statuses[-1]}")
     assert "Audio" in statuses[-1] and "file 2 of 2" in statuses[-1]
 r.destroy()
 print("ALL OK")

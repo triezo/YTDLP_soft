@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Пунктирная рамка фокуса убрана, но всё остальное на месте."""
+"""The dotted focus ring is gone, everything else still in place."""
 import os as _os
 _ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 APP = _os.path.join(_ROOT, "ytdlp_gui.pyw")
@@ -31,11 +31,11 @@ for style, gone, must in (("TNotebook.Tab", "Notebook.focus", "Notebook.label"),
                           ("TButton", "Button.focus", "Button.label")):
     els = flatten(s.layout(style))
     print(f"{style:<16} {els}")
-    assert gone not in els, f"{gone} всё ещё в разметке"
-    assert must in els, f"потеряли {must}!"
-print("пунктир убран, подписи на месте")
+    assert gone not in els, f"{gone} is still in the layout"
+    assert must in els, f"{must} went missing!"
+print("dotted ring removed, labels still there")
 
-# вкладки по-прежнему переключаются и не скачут
+# tabs still switch and still do not jump sideways
 bounds = []
 for i in range(3):
     app.nb.select(i)
@@ -49,15 +49,15 @@ for i in range(3):
         if idx != last:
             b.append(px); last = idx
     bounds.append(tuple(b))
-print("границы вкладок:", set(bounds))
-assert len(set(bounds)) == 1, "вкладки поехали"
-assert app.nb.index("current") == 2, "переключение сломалось"
+print("tab boundaries:", set(bounds))
+assert len(set(bounds)) == 1, "the tabs moved"
+assert app.nb.index("current") == 2, "switching broke"
 
-# кнопки живы и жмутся
+# buttons are alive and focusable
 app.nb.select(1)
 r.update_idletasks()
-print("кнопка Convert:", app.cbtn.cget("text"), "| состояние:", app.cbtn.state())
+print("Convert button:", app.cbtn.cget("text"), "| state:", app.cbtn.state())
 app.cbtn.focus_force(); r.update()
-print("фокус на кнопке:", r.focus_get() is app.cbtn)
+print("focus on the button:", r.focus_get() is app.cbtn)
 r.destroy()
 print("ALL OK")

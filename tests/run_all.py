@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""Прогон всех тестов: python tests/run_all.py
+"""Run every test: python tests/run_all.py
 
-Тесты открывают настоящие окна и дёргают ffmpeg, поэтому идут не мгновенно.
-test_exe.py требует собранный dist/YT-DLP GUI.exe и пропускается без него.
+They open real windows and drive real ffmpeg, so they take a minute.
+test_exe.py needs a built dist/YT-DLP GUI.exe and is skipped without one.
 """
 import os
 import subprocess
@@ -22,16 +22,16 @@ for name in ORDER:
     if not os.path.exists(path):
         continue
     if name == "test_exe.py" and not os.path.exists(EXE):
-        print(f"{name:<22} пропущен — нет собранного exe")
+        print(f"{name:<22} skipped, no built exe")
         continue
     r = subprocess.run([sys.executable, path], capture_output=True,
                        text=True, encoding="utf-8", errors="replace")
     ok = "ALL OK" in (r.stdout or "")
-    print(f"{name:<22} {'OK' if ok else 'ПРОВАЛ'}")
+    print(f"{name:<22} {'OK' if ok else 'FAILED'}")
     if not ok:
         fails.append(name)
         tail = (r.stdout or "") + (r.stderr or "")
         print("\n".join("      " + ln for ln in tail.strip().split("\n")[-12:]))
 
-print("\nитог:", "всё зелёное" if not fails else f"провалились: {', '.join(fails)}")
+print("\nresult:", "all green" if not fails else f"failed: {', '.join(fails)}")
 sys.exit(1 if fails else 0)

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Правильность отражений и поворотов — по конкретным пикселям."""
+"""Flips and rotations checked against specific pixels."""
 import os as _os
 _ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 APP = _os.path.join(_ROOT, "ytdlp_gui.pyw")
@@ -14,7 +14,7 @@ W, H = 4, 3
 
 
 def mk():
-    """Картинка, где в красный канал зашит x, в зелёный y — легко проверять."""
+    """An image with x baked into red and y into green, easy to verify."""
     b = bytearray()
     for y in range(H):
         for x in range(W):
@@ -28,69 +28,69 @@ def px(rgba, w, x, y):
 
 
 src = mk()
-print("исходник 4x3, пиксель (x,y) = (x*10, y*10)")
+print("source 4x3, pixel (x,y) = (x*10, y*10)")
 
-# --- отражение по горизонтали
+# --- horizontal flip
 out = m.flip_h(src, W, H)
 assert px(out, W, 0, 0) == (30, 0), px(out, W, 0, 0)
 assert px(out, W, 3, 2) == (0, 20), px(out, W, 3, 2)
-print("flip_h: левый верх стал правым верхом — ОК")
+print("flip_h: top-left became top-right: OK")
 
-# --- по вертикали
+# --- vertical flip
 out = m.flip_v(src, W, H)
 assert px(out, W, 0, 0) == (0, 20)
 assert px(out, W, 3, 0) == (30, 20)
-print("flip_v: верх и низ поменялись — ОК")
+print("flip_v: top and bottom swapped: OK")
 
-# --- поворот по часовой: (x,y) -> (h-1-y, x), размер меняется
+# --- clockwise: (x,y) -> (h-1-y, x), and the size changes
 out, nw, nh = m.rot90(src, W, H, cw=True)
 assert (nw, nh) == (3, 4), (nw, nh)
 for y in range(H):
     for x in range(W):
         assert px(out, nw, H - 1 - y, x) == (x * 10, y * 10), (x, y)
-print("rot90 по часовой: размер 3x4, все пиксели на местах — ОК")
+print("rot90 clockwise: size 3x4, every pixel in place: OK")
 
-# --- против часовой: (x,y) -> (y, w-1-x)
+# --- counter-clockwise: (x,y) -> (y, w-1-x)
 out, nw, nh = m.rot90(src, W, H, cw=False)
 assert (nw, nh) == (3, 4)
 for y in range(H):
     for x in range(W):
         assert px(out, nw, y, W - 1 - x) == (x * 10, y * 10), (x, y)
-print("rot90 против часовой — ОК")
+print("rot90 counter-clockwise: OK")
 
-# --- четыре поворота возвращают оригинал
+# --- four rotations return the original
 cur, w, h = src, W, H
 for _ in range(4):
     cur, w, h = m.rot90(cur, w, h, cw=True)
 assert (w, h) == (W, H) and cur == src
-print("четыре поворота = исходник — ОК")
+print("four rotations equal the source: OK")
 
-# --- 180° = оба отражения
+# --- 180° equals both flips
 a, aw, ah = m.transform_rgba(src, W, H, rot=180)
 b = m.flip_v(m.flip_h(src, W, H), W, H)
 assert (aw, ah) == (W, H) and a == b
-print("поворот 180° совпал с двойным отражением — ОК")
+print("a 180° rotation matched the double flip: OK")
 
-# --- кодирование и обратное чтение PNG
+# --- encode a PNG and read it back
 png = m.encode_png(W, H, src)
 back = m.decode_png(png)
 assert back and back[1:] == (W, H) and back[0] == src
-print("PNG: закодировали и прочитали обратно без потерь — ОК")
+print("PNG: encoded and read back losslessly: OK")
 
-# --- уменьшение для превью
+# --- downscale for the preview
 big = bytes(bytearray(800 * 600 * 4))
 t = time.time()
 small, sw, sh = m.shrink_rgba(big, 800, 600, 200, 150)
-print(f"уменьшение 800x600 -> {sw}x{sh} за {(time.time()-t)*1000:.0f} мс")
+print(f"downscale 800x600 -> {sw}x{sh} in {(time.time()-t)*1000:.0f} ms")
 assert (sw, sh) == (200, 150)
 
-# --- скорость на настоящем размере скрина
+# --- speed on a real screenshot-sized frame
 big = bytes(bytearray(1920 * 1080 * 4))
 for name, fn in (("flip_h", lambda: m.flip_h(big, 1920, 1080)),
                  ("flip_v", lambda: m.flip_v(big, 1920, 1080)),
                  ("rot90", lambda: m.rot90(big, 1920, 1080))):
     t = time.time(); fn()
     dt = (time.time() - t) * 1000
-    print(f"{name} на 1920x1080: {dt:.0f} мс")
-    assert dt < 900, f"{name} слишком медленный"
+    print(f"{name} on 1920x1080: {dt:.0f} ms")
+    assert dt < 900, f"{name} is too slow"
 print("ALL OK")

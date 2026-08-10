@@ -1,2 +1,9 @@
 __pycache__/
 *.pyc
+
+# сборка PyInstaller и готовый пакет для раздачи
+build/
+dist/
+share/
+*.zip
+*.spec

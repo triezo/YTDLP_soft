@@ -80,7 +80,10 @@ cd YTDLP_soft
 pythonw ytdlp_gui.pyw
 ```
 
-Or just double-click `YT-DLP GUI.bat`.
+Or just double-click `YT-DLP GUI.bat` — it works even on a PC without
+Python: if none is found, it installs Python 3.12 for the current user (via
+winget, or the official installer from python.org; no admin rights needed)
+and then starts the app.
 
 Needs Python 3 with tkinter (the installer from python.org includes it).
 No `pip install` beforehand: on first launch the app notices that `yt-dlp` or

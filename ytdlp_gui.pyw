@@ -25,6 +25,7 @@ if len(sys.argv) > 1 and sys.argv[1] == YTDLP_FLAG:
     sys.exit(_ytdlp_main())
 
 import glob
+import base64
 import time
 import zlib
 import struct
@@ -547,6 +548,50 @@ def setup_windows_look():
     try:
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)
     except (AttributeError, OSError):
+        pass
+
+
+SHORTCUT_PS = r"""
+$ws = New-Object -ComObject WScript.Shell
+foreach ($dir in @([Environment]::GetFolderPath('Desktop'),
+                   [Environment]::GetFolderPath('Programs'))) {
+    if (-not $dir) { continue }
+    $lnk = $ws.CreateShortcut((Join-Path $dir 'YT-DLP GUI.lnk'))
+    $lnk.TargetPath = $env:YG_TARGET
+    $lnk.Arguments = '"' + $env:YG_SCRIPT + '"'
+    $lnk.WorkingDirectory = $env:YG_DIR
+    $lnk.IconLocation = $env:YG_ICON + ',0'
+    $lnk.Description = 'Video downloader and converter'
+    $lnk.Save()
+}
+"""
+
+
+def create_shortcuts():
+    """Source version only: put a proper "YT-DLP GUI" shortcut with our icon
+    on the desktop and in the Start menu, so the app is launched like any
+    other program, straight through pythonw (no console, no .bat).
+    Done once; a shortcut the user deleted is not brought back."""
+    if FROZEN or load_reg("shortcut") == "1":
+        return
+    pyw = sys.executable
+    if os.path.basename(pyw).lower() == "python.exe":
+        cand = os.path.join(os.path.dirname(pyw), "pythonw.exe")
+        if os.path.exists(cand):
+            pyw = cand
+    env = dict(os.environ, YG_TARGET=pyw, YG_DIR=APP_DIR,
+               YG_SCRIPT=os.path.abspath(__file__), YG_ICON=res_path("app.ico"))
+    try:
+        r = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive",
+             "-ExecutionPolicy", "Bypass", "-EncodedCommand",
+             # base64 UTF-16: no command-line quoting to get wrong
+             base64.b64encode(SHORTCUT_PS.encode("utf-16-le")).decode()],
+            env=env, capture_output=True, timeout=60,
+            creationflags=subprocess.CREATE_NO_WINDOW)
+        if r.returncode == 0:
+            save_reg("shortcut", "1")
+    except (OSError, subprocess.SubprocessError):
         pass
 
 
@@ -2033,4 +2078,5 @@ if __name__ == "__main__":
     setup_windows_look()
     root = TkinterDnD.Tk() if TkinterDnD else tk.Tk()
     App(root)
+    threading.Thread(target=create_shortcuts, daemon=True).start()
     root.mainloop()

@@ -85,6 +85,12 @@ Python: if none is found, it installs Python 3.12 for the current user (via
 winget, or the official installer from python.org; no admin rights needed)
 and then starts the app.
 
+On the first launch from source the app puts a **YT-DLP GUI shortcut with its
+own icon** on the desktop and in the Start menu. From then on start it from
+there like any other program — no console window, no `.bat`. (Deleted the
+shortcut? It is not recreated; the setting is `shortcut` under
+`HKCU\Software\ytdlp-gui`.)
+
 Needs Python 3 with tkinter (the installer from python.org includes it).
 No `pip install` beforehand: on first launch the app notices that `yt-dlp` or
 `tkinterdnd2` is missing and installs them itself (into the per-user folder if

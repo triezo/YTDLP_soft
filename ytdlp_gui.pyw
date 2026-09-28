@@ -2,7 +2,7 @@
 """A small GUI for yt-dlp, plus a converter built on ffmpeg.
 
 Run it from the desktop shortcut, from "YT-DLP GUI.bat", or feed this
-.pyw to a Python 3 that has tkinter and yt-dlp installed.
+.pyw to any Python 3 with tkinter: missing libraries are installed on first launch.
 """
 
 import os
@@ -37,6 +37,121 @@ import winreg
 from collections import deque
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
+
+
+def _console_python():
+    """python.exe next to pythonw.exe: child processes need real stdout/stderr,
+    and CREATE_NO_WINDOW keeps the console from flashing anyway."""
+    exe = sys.executable
+    if os.path.basename(exe).lower() == "pythonw.exe":
+        cand = os.path.join(os.path.dirname(exe), "python.exe")
+        if os.path.exists(cand):
+            return cand
+    return exe
+
+
+# Third-party modules the source version needs. The exe has them built in;
+# a plain Python install does not, so on first launch we fetch them ourselves
+# instead of making the user open a terminal and run pip.
+DEPS = (("yt_dlp", "yt-dlp", True),         # (module, pip name, required)
+        ("tkinterdnd2", "tkinterdnd2", False))
+
+
+def _missing_deps():
+    import importlib.util
+    importlib.invalidate_caches()
+    return [d for d in DEPS if importlib.util.find_spec(d[0]) is None]
+
+
+def _pip(args, log):
+    """Run pip with our interpreter, bootstrapping pip itself if it is absent."""
+    py = _console_python()
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    base = [py, "-m", "pip", "install", "--disable-pip-version-check",
+            "--no-input"]
+
+    def run(cmd):
+        r = subprocess.run(cmd, capture_output=True, text=True,
+                           encoding="utf-8", errors="replace",
+                           creationflags=flags)
+        log.append((r.stdout or "") + (r.stderr or ""))
+        return r.returncode == 0
+
+    if not run([py, "-m", "pip", "--version"]):
+        run([py, "-m", "ensurepip", "--upgrade", "--default-pip"])
+    # a Python installed for all users sits in Program Files, which is
+    # read-only without admin rights: fall back to the per-user folder
+    return run(base + args) or run(base + ["--user"] + args)
+
+
+def ensure_deps():
+    """Install missing libraries, with a small window so the first launch
+    does not look frozen while pip is working."""
+    missing = _missing_deps()
+    if not missing:
+        return
+    import site
+    import tkinter as tk
+    from tkinter import ttk, messagebox
+
+    log, done = [], threading.Event()
+    names = [d[1] for d in missing]
+
+    def work():
+        try:
+            _pip(names, log)
+        except OSError as e:
+            log.append(str(e))
+        finally:
+            done.set()
+
+    win = tk.Tk()
+    win.title("YT-DLP GUI")
+    win.resizable(False, False)
+    frm = ttk.Frame(win, padding=20)
+    frm.pack()
+    ttk.Label(frm, text="First launch: installing components\n"
+                        + ", ".join(names) + "\n\nThis takes up to a minute…",
+              justify="center").pack()
+    bar = ttk.Progressbar(frm, mode="indeterminate", length=280)
+    bar.pack(pady=(12, 0))
+    bar.start(12)
+    win.update_idletasks()
+    win.geometry(f"+{(win.winfo_screenwidth() - win.winfo_width()) // 2}"
+                 f"+{(win.winfo_screenheight() - win.winfo_height()) // 3}")
+    win.protocol("WM_DELETE_WINDOW", lambda: None)
+    threading.Thread(target=work, daemon=True).start()
+
+    def poll():
+        if done.is_set():
+            win.destroy()
+        else:
+            win.after(100, poll)
+    win.after(100, poll)
+    win.mainloop()
+
+    # a --user install may have created the user site folder just now,
+    # after Python had already decided not to put it on sys.path
+    try:
+        user_site = site.getusersitepackages()
+        if os.path.isdir(user_site) and user_site not in sys.path:
+            site.addsitedir(user_site)
+    except (AttributeError, OSError):
+        pass
+
+    still = _missing_deps()
+    if any(req for _, _, req in still):
+        tail = "\n".join("".join(log).strip().splitlines()[-8:])
+        messagebox.showerror(
+            "YT-DLP GUI",
+            "Could not install yt-dlp automatically. Check the internet "
+            "connection and restart the program, or run in a terminal:\n\n"
+            f"  \"{_console_python()}\" -m pip install yt-dlp tkinterdnd2\n\n"
+            + tail)
+
+
+if __name__ == "__main__" and not getattr(sys, "frozen", False):
+    ensure_deps()
 
 # Drag-and-drop from Explorer and browsers. Without the library the app
 # still works, just without drag-and-drop.
@@ -361,12 +476,20 @@ def res_path(name):
     return os.path.join(getattr(sys, "_MEIPASS", APP_DIR), name)
 
 
+def _have_ytdlp_module():
+    import importlib.util
+    return importlib.util.find_spec("yt_dlp") is not None
+
+
 def find_ytdlp():
     """External yt-dlp.exe if there is one. A copy next to the program wins,
-    so a fresh version can be dropped in without rebuilding the exe."""
+    so a fresh version can be dropped in without rebuilding the exe.
+    None means "run the yt_dlp module through ourselves"."""
     local = os.path.join(APP_DIR, "yt-dlp.exe")
     if os.path.exists(local):
         return local
+    if not FROZEN and _have_ytdlp_module():
+        return None     # the copy in our own Python, the one ensure_deps put there
     exe = shutil.which("yt-dlp")
     if exe:
         return exe
@@ -382,7 +505,11 @@ YTDLP = find_ytdlp()
 
 def ytdlp_cmd():
     """How to invoke yt-dlp: an external exe, or ourselves in yt-dlp mode."""
-    return [YTDLP] if YTDLP else [sys.executable, YTDLP_FLAG]
+    if YTDLP:
+        return [YTDLP]
+    if FROZEN:
+        return [sys.executable, YTDLP_FLAG]
+    return [_console_python(), os.path.abspath(__file__), YTDLP_FLAG]
 
 
 def find_ffmpeg():
@@ -1789,6 +1916,8 @@ class App:
     @staticmethod
     def _python_for_ytdlp():
         """The interpreter that owns yt-dlp.exe (...\\Scripts\\yt-dlp.exe)."""
+        if not YTDLP:
+            return _console_python()
         cand = os.path.join(os.path.dirname(os.path.dirname(YTDLP)), "python.exe")
         return cand if os.path.exists(cand) else sys.executable
 
@@ -1801,8 +1930,23 @@ class App:
             return [YTDLP, "-U"]
         if FROZEN:
             return None
-        return [self._python_for_ytdlp(), "-m", "pip", "install", "-U",
-                "--disable-pip-version-check", "yt-dlp"]
+        cmd = [self._python_for_ytdlp(), "-m", "pip", "install", "-U",
+               "--disable-pip-version-check", "yt-dlp"]
+        if not YTDLP and self._ytdlp_in_user_site():
+            cmd.insert(4, "--user")   # where ensure_deps put it without admin rights
+        return cmd
+
+    @staticmethod
+    def _ytdlp_in_user_site():
+        import importlib.util
+        import site
+        try:
+            spec = importlib.util.find_spec("yt_dlp")
+            user = os.path.normcase(os.path.abspath(site.getusersitepackages()))
+            return bool(spec and spec.origin) and os.path.normcase(
+                os.path.abspath(spec.origin)).startswith(user)
+        except (AttributeError, ImportError, OSError, ValueError):
+            return False
 
     def update_ytdlp(self):
         if self.busy:

@@ -31,7 +31,11 @@ Paste a link, pick a format, press Download.
   `Video: 70.2% · 28.0 MB/s · left 00:09 · file 1 of 2 · video 3 of 12`
 - **Speed graph** in a spoiler that expands under the button
 - **Update yt-dlp** button — YouTube breaks compatibility every few months and
-  this saves a trip to the terminal
+  this saves a trip to the terminal. On startup the app compares the installed
+  yt-dlp with the latest release on GitHub; if it is behind, the whole window
+  is covered by an "out of date" screen with one big Update button, and
+  nothing works until it is pressed. The exe build fetches the official
+  `yt-dlp.exe` into `%LOCALAPPDATA%\ytdlp-gui` and uses it from then on
 
 ### ⚙ Convert
 

@@ -35,8 +35,10 @@ ABOUT FFMPEG (important)
 
 IF DOWNLOADS STOP WORKING
   YouTube keeps changing its protections, so yt-dlp needs regular updates.
-  Download a fresh yt-dlp.exe from github.com/yt-dlp/yt-dlp/releases and
-  drop it next to this program — it will be used instead of the bundled one.
+  The program checks this itself on startup: if yt-dlp is out of date, the
+  window shows a big "Update yt-dlp" button — press it and wait a moment.
+  You can also drop a fresh yt-dlp.exe from github.com/yt-dlp/yt-dlp/releases
+  next to this program — it will be used instead of the bundled one.
 
   If you see "Sign in to confirm you're not a bot", open the Download tab
   and pick your browser in the "Cookies" list.

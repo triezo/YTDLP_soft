@@ -16,6 +16,10 @@ ORDER = ["test_transform.py", "test_imgtab.py", "test_dnd.py", "test_eta.py",
          "test_playlist.py", "test_focus.py", "test_focusring.py",
          "test_polish.py", "test_cancel.py", "test_close.py", "test_exe.py"]
 
+# the app blocks itself behind an "update yt-dlp" screen when the installed
+# yt-dlp is behind the latest release; the tests must not depend on that
+os.environ["YTDLP_GUI_NO_UPDATE_CHECK"] = "1"
+
 fails = []
 for name in ORDER:
     path = os.path.join(HERE, name)

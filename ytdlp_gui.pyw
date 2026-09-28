@@ -477,6 +477,33 @@ def res_path(name):
     return os.path.join(getattr(sys, "_MEIPASS", APP_DIR), name)
 
 
+# Where the exe build keeps the yt-dlp.exe it downloads on update: the
+# program folder itself may be read-only (Program Files, a zip preview).
+USER_YTDLP = os.path.join(os.path.expandvars("%LOCALAPPDATA%"), "ytdlp-gui",
+                          "yt-dlp.exe")
+YTDLP_EXE_URL = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe"
+YTDLP_LATEST_API = "https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest"
+
+
+def _ver_tuple(v):
+    """'2026.08.19' -> (2026, 8, 19); None if it does not look like a version."""
+    parts = re.findall(r"\d+", v or "")
+    return tuple(int(x) for x in parts) if len(parts) >= 3 else None
+
+
+def latest_ytdlp_version():
+    """Newest yt-dlp release tag from GitHub, or None when offline."""
+    import json
+    import urllib.request
+    try:
+        req = urllib.request.Request(YTDLP_LATEST_API, headers={
+            "Accept": "application/vnd.github+json", "User-Agent": "ytdlp-gui"})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return json.load(r).get("tag_name")
+    except (OSError, ValueError):
+        return None
+
+
 def _have_ytdlp_module():
     import importlib.util
     return importlib.util.find_spec("yt_dlp") is not None
@@ -486,9 +513,9 @@ def find_ytdlp():
     """External yt-dlp.exe if there is one. A copy next to the program wins,
     so a fresh version can be dropped in without rebuilding the exe.
     None means "run the yt_dlp module through ourselves"."""
-    local = os.path.join(APP_DIR, "yt-dlp.exe")
-    if os.path.exists(local):
-        return local
+    for local in (os.path.join(APP_DIR, "yt-dlp.exe"), USER_YTDLP):
+        if os.path.exists(local):
+            return local
     if not FROZEN and _have_ytdlp_module():
         return None     # the copy in our own Python, the one ensure_deps put there
     exe = shutil.which("yt-dlp")
@@ -677,6 +704,11 @@ class App:
         self._setup_dnd()
         self._center()
         root.protocol("WM_DELETE_WINDOW", self.on_close)
+
+        self.outdated = False
+        self._gate = None
+        if not os.environ.get("YTDLP_GUI_NO_UPDATE_CHECK"):   # set by the tests
+            threading.Thread(target=self._check_ytdlp_version, daemon=True).start()
 
         if not FFMPEG:
             # without ffmpeg there is no merging of 1080p+ and no conversion at all,
@@ -1623,6 +1655,8 @@ class App:
     def start(self):
         if self.busy:  # Enter in the link field is not gated by the button state
             return
+        if self.outdated:
+            return
         url = self.url.get().strip()
         if not url.lower().startswith(("http://", "https://")):
             messagebox.showwarning('No link', 'Paste a video link (http/https).')
@@ -1993,23 +2027,112 @@ class App:
         except (AttributeError, ImportError, OSError, ValueError):
             return False
 
+    def _local_ytdlp_version(self):
+        try:
+            return subprocess.run(
+                ytdlp_cmd() + ["--version"], capture_output=True, text=True,
+                timeout=60, creationflags=subprocess.CREATE_NO_WINDOW).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            return ""
+
+    def _check_ytdlp_version(self):
+        """YouTube breaks old yt-dlp within weeks, and then every download fails
+        with a cryptic error. So compare with the newest release up front and,
+        if we are behind, block the app until it is updated. Offline or
+        unknown version: say nothing rather than lock the user out."""
+        latest = latest_ytdlp_version()
+        local = self._local_ytdlp_version()
+        lt, lc = _ver_tuple(latest), _ver_tuple(local)
+        if lt and (lc is None and not local or lc and lc < lt):
+            self._ui(self._show_gate, local or "not found", latest)
+
+    def _show_gate(self, local, latest):
+        """A screen over the whole window: nothing works until yt-dlp is updated."""
+        self.outdated = True
+        if self._gate is None:
+            g = self._gate = tk.Frame(self.root, bg=BG)
+            box = tk.Frame(g, bg=BG)
+            box.place(relx=0.5, rely=0.45, anchor="center")
+            tk.Label(box, text="⚠", bg=BG, fg=WARN,
+                     font=(F, 48)).pack()
+            tk.Label(box, text="yt-dlp is out of date", bg=BG, fg=FG,
+                     font=(F, 20, "bold")).pack(pady=(4, 0))
+            self._gate_info = tk.Label(box, bg=BG, fg=FG_DIM, font=(F, 11),
+                                       justify="center")
+            self._gate_info.pack(pady=(10, 0))
+            tk.Label(box, text="YouTube keeps changing things, and an old "
+                               "yt-dlp simply stops downloading.\n"
+                               "Nothing will work until you update.",
+                     bg=BG, fg=FG_DIM, font=(F, 10), justify="center"
+                     ).pack(pady=(10, 0))
+            self._gate_btn = tk.Button(
+                box, text="⟳   Update yt-dlp", command=self.update_ytdlp,
+                bg=ACCENT, fg="white", activebackground=ACCENT_HI,
+                activeforeground="white", disabledforeground="#f3c1c3",
+                relief="flat", bd=0, cursor="hand2", font=(F, 16, "bold"),
+                padx=int(40 * self.k), pady=int(14 * self.k))
+            self._gate_btn.pack(pady=(26, 0))
+            self._gate_msg = tk.Label(box, text="", bg=BG, fg=MUTE,
+                                      font=(F, 10), justify="center",
+                                      wraplength=int(480 * self.k))
+            self._gate_msg.pack(pady=(14, 0))
+        self._gate_info.configure(
+            text=f"installed: {local}     •     latest: {latest}")
+        self._gate_btn.configure(state="normal", text="⟳   Update yt-dlp")
+        self._gate_msg.configure(text="")
+        self._gate.place(x=0, y=0, relwidth=1, relheight=1)
+        self._gate.lift()
+
+    def _hide_gate(self):
+        self.outdated = False
+        if self._gate is not None:
+            self._gate.place_forget()
+
     def update_ytdlp(self):
         if self.busy:
             return
-        if self._upd_cmd() is None:
-            messagebox.showinfo(
-                'Update',
-                'yt-dlp is bundled into this build and ships with it.\n\nTo update right now, download a fresh yt-dlp.exe from github.com/yt-dlp/yt-dlp and put it next to this program — it will be picked up automatically.')
-            return
         self._job_begin()
+        if self._gate is not None:
+            self._gate_btn.configure(state="disabled", text="Updating…")
+            self._gate_msg.configure(text="This may take a minute.", fg=MUTE)
         self.bar.configure(mode="indeterminate")
         self.bar.start(12)
         self.set_status('Updating yt-dlp… (may take a minute)')
         threading.Thread(target=self._upd_worker, daemon=True).start()
 
+    def _download_ytdlp_exe(self):
+        """Exe build without an external yt-dlp: fetch the official yt-dlp.exe
+        into LOCALAPPDATA and use it from now on instead of the bundled one."""
+        global YTDLP
+        import urllib.request
+        tmp = USER_YTDLP + ".part"
+        try:
+            os.makedirs(os.path.dirname(USER_YTDLP), exist_ok=True)
+            self._ui(self.log_line, f"Downloading {YTDLP_EXE_URL}")
+            req = urllib.request.Request(YTDLP_EXE_URL,
+                                         headers={"User-Agent": "ytdlp-gui"})
+            with urllib.request.urlopen(req, timeout=30) as r, open(tmp, "wb") as out:
+                shutil.copyfileobj(r, out, 1 << 20)
+            os.replace(tmp, USER_YTDLP)
+        except OSError as e:
+            self._ui(self.log_line, f"Could not download yt-dlp: {e}")
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            return -1
+        YTDLP = USER_YTDLP
+        return 0
+
     def _upd_worker(self):
         rc, ver = -1, ""
         cmd = self._upd_cmd()
+        if cmd is None:
+            rc = self._download_ytdlp_exe()
+            if rc == 0:
+                ver = self._local_ytdlp_version()
+            self._ui(self._upd_done, rc, ver)
+            return
         try:
             self.proc = subprocess.Popen(
                 cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -2037,6 +2160,18 @@ class App:
         self.bar.stop()
         self.bar.configure(mode="determinate", value=0)
         self._job_end(rc, '✔ yt-dlp updated' + (f" — version {ver}" if ver else ""))
+        if self._gate is None:
+            return
+        if rc == 0 and not self.cancelled:
+            self._hide_gate()
+        elif self.outdated:
+            # the log is hidden under the gate, so bring its last line up here
+            lines = [ln for ln in self.log.get("1.0", "end").splitlines() if ln.strip()]
+            self._gate_btn.configure(state="normal", text="⟳   Try again")
+            self._gate_msg.configure(
+                fg=ACCENT, text="The update failed — check the internet "
+                                "connection and try again."
+                                + (f"\n\n{lines[-1][:300]}" if lines else ""))
 
     # ------------------------------------------------------------ cancel
 

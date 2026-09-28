@@ -77,14 +77,16 @@ code-signed. Click **More info → Run anyway**.
 ```bash
 git clone https://github.com/triezo/YTDLP_soft.git
 cd YTDLP_soft
-pip install yt-dlp tkinterdnd2
 pythonw ytdlp_gui.pyw
 ```
 
-Needs Python 3 with tkinter (the installer from python.org includes it).
-`tkinterdnd2` is optional — without it everything works except drag-and-drop.
-
 Or just double-click `YT-DLP GUI.bat`.
+
+Needs Python 3 with tkinter (the installer from python.org includes it).
+No `pip install` beforehand: on first launch the app notices that `yt-dlp` or
+`tkinterdnd2` is missing and installs them itself (into the per-user folder if
+Python sits in a read-only location). `tkinterdnd2` is optional — if it cannot
+be installed, everything works except drag-and-drop.
 
 ### Build the exe yourself
 
